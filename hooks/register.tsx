@@ -38,6 +38,8 @@ import {
   fmtSpeed,
   listOf,
   logRows,
+  MINI_ROWS,
+  miniLog,
   momentOf,
   normalize,
   normalizeCard,
@@ -185,7 +187,7 @@ async function isArchitectType($: EngineInterface, cfg: Config, type: string) {
 
 async function openPane($: EngineInterface) {
   // columns apply when docked beside the transcript, rows when seated inline above the prompt.
-  return $.ui.open({ id: PANE, title: TITLE, columns: PANE_COLUMNS, rows: 8 })
+  return $.ui.open({ id: PANE, title: TITLE, columns: PANE_COLUMNS, rows: MINI_ROWS })
 }
 
 async function resetAll($: EngineInterface) {
@@ -1027,6 +1029,11 @@ export const register: Register = (on, options) => {
       const counts = ` ${s.rule} allowed · ${s.cleared} ${decider}${s.ask > 0 ? ` · ${s.ask} pending` : ''} · ${s.deny} denied`
       const strip = g.recent.slice(-Math.max(4, W - cfg.gateLabel.length - 1 - counts.length))
       const mg = u.pct !== null ? gauge(u.pct, 6) : null
+      const fill = cfg.miniFill
+      const more = cards.length > live.length
+      const ended = !m.isRunning && r
+      const used = 1 + (strip.length > 0 ? 1 : 0) + live.length + (more ? 1 : 0) + (lp.length > 0 ? 1 : 0) + (ended ? 1 : 0)
+      const tail = fill ? miniLog(lines, used, viewed) : []
       return (
         <Box flexDirection="column" width={W}>
           <Text wrap="truncate">
@@ -1041,6 +1048,22 @@ export const register: Register = (on, options) => {
             {u.compactions > 0 ? <Text color={C.amber}>{` ⟲${u.compactions}`}</Text> : null}
             {u.costUsd !== null ? <Text dimColor>{` · ${fmtUsd(u.costUsd)}`}</Text> : null}
             {showArchitect ? <Text color={C.arch}>{` · ${cfg.architectLabel.toLowerCase()} ${advising ? 'advising' : a.consults.length}`}</Text> : null}
+            {fill && m.effort ? <Text dimColor>{` · effort ${m.effort}`}</Text> : null}
+            {fill && m.mode ? <Text dimColor>{` · mode ${m.mode}`}</Text> : null}
+            {fill && m.steps > 0 ? <Text dimColor>{` · ${m.steps} req`}</Text> : null}
+            {fill
+              ? u.limits.slice(0, 2).map(l => {
+                  const lg = gauge(l.pct, 5)
+                  return (
+                    <Text>
+                      <Text dimColor>{` · ${limitLabel(l.kind)} `}</Text>
+                      <Text color={l.pct >= 80 ? C.warn : C.main}>{lg.on}</Text>
+                      <Text color={C.faint}>{lg.off}</Text>
+                      <Text dimColor>{` ${Math.round(l.pct)}%`}</Text>
+                    </Text>
+                  )
+                })
+              : null}
           </Text>
           {strip.length > 0 ? (
             <Box>
@@ -1065,15 +1088,22 @@ export const register: Register = (on, options) => {
               {clock(`mini-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}
             </Box>
           ))}
-          {cards.length > live.length ? (
+          {more ? (
             <Text color={C.faint} wrap="truncate">{`+${cards.length - live.length} more agents · /flightdeck layout compact for all`}</Text>
           ) : null}
           {lp.length > 0 ? <Text dimColor>{`other loops ${lp.length} · ${lp.filter(l => isLoopActive(l, now)).length} active`}</Text> : null}
-          {!m.isRunning && r ? (
+          {ended ? (
             <Text dimColor wrap="truncate">
               {`last turn ${fmtDuration(r.durationMs)} · ${plural(r.agents, 'agent')} · ${plural(r.edits, 'edit')} · ${plural(r.errors, 'error')}${r.costDelta !== null ? ` · +${fmtUsd(r.costDelta)}` : ''}`}
             </Text>
           ) : null}
+          {tail.map(l => (
+            <Text wrap="truncate">
+              <Text color={C.faint}>{`${fmtClock(l.at)} `}</Text>
+              <Text color={colorOf(l)} bold>{`${l.who} `}</Text>
+              <Text color={l.kind === 'error' ? C.warn : C.text}>{l.text}</Text>
+            </Text>
+          ))}
         </Box>
       )
     }

@@ -107,6 +107,7 @@ export type Config = {
   palette: Palette
   openOnStart: boolean
   statusLine: boolean
+  miniFill: boolean
 }
 
 const safeRegExp = (source: string, fallback: string) => {
@@ -140,6 +141,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     palette: str('palette', 'theme') === 'pastel' ? 'pastel' : 'theme',
     openOnStart: bool('openOnStart', true),
     statusLine: bool('statusLine', true),
+    miniFill: bool('miniFill', true),
   }
 }
 
@@ -463,6 +465,15 @@ export const lanes = (cards: AgentCard[], now: number, width: number) => {
 
 /** How many log lines fit: what the other panels leave, never fewer than 4 nor more than 8. */
 export const logRows = (bodyRows: number, used: number) => Math.max(4, Math.min(8, bodyRows - used - 3))
+
+/** The rows the pane asks for when seated inline above the prompt; the mini layout never draws more. */
+export const MINI_ROWS = 8
+
+/** The newest log lines (only the viewed transcript's, when one is viewed) for the rows the mini summary leaves, oldest first. */
+export const miniLog = <T extends { agentId: string | null }>(lines: readonly T[], used: number, viewed: string | null = null) => {
+  const n = Math.max(0, MINI_ROWS - used)
+  return n === 0 ? [] : (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-n)
+}
 
 /** Legend items that fit on one row of `width` cells, in order; the rest are dropped. */
 export const fitLegend = <T extends { label: string }>(items: T[], width: number) => {

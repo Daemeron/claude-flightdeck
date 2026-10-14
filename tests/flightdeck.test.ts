@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 import {
   DEFAULT_ARCHITECT,
@@ -18,6 +19,8 @@ import {
   limitLabel,
   limitOf,
   logRows,
+  MINI_ROWS,
+  miniLog,
   momentOf,
   normalizeCard,
   normalizeGate,
@@ -494,4 +497,119 @@ test("the main box shows the last request's time to first token and decode speed
     expect(await ui.find({ text: /ttft 0\.8s · 60 tok\/s/ })).toBeDefined()
     await ui.unmount()
   }
+})
+
+// ---------------------------------------------------------------- inline fill
+
+const inline = (cols = 80) => ({ ...pane(cols), props: { ...pane(cols).props, placement: 'inline' as const }, surface: 'terminal' as const })
+
+/** The mini layout's rows: the root's children, arrays flattened, nulls dropped. */
+const rowsOf = async (ui: { drawn: () => Promise<unknown> }) => {
+  const root = (await ui.drawn()) as { children?: unknown[] }
+  return (root.children ?? []).flat(Infinity).filter(Boolean).length
+}
+
+const idleWithPrompts = async ($: Parameters<TestBody>[0], n: number) => {
+  for (let i = 1; i <= n; i += 1) {
+    await $.turn.start({ text: `prompt ${i}`, turnId: `P${i}` })
+    await $.turn.complete({ answer: '', durationMs: 10, isAborted: false, turnId: `P${i}`, reason: 'answer' })
+  }
+}
+
+test('the row budget fills with the newest log lines and never passes 8', () => {
+  const lines = Array.from({ length: 10 }, (_, i) => ({ agentId: i % 2 ? 'a1' : null, i }))
+  expect(MINI_ROWS).toBe(8)
+  expect(miniLog(lines, 2).map(l => l.i)).toEqual([4, 5, 6, 7, 8, 9])
+  expect(miniLog(lines, 8)).toEqual([])
+  expect(miniLog(lines, 9)).toEqual([])
+  expect(miniLog(lines, 5, 'a1').map(l => l.i)).toEqual([5, 7, 9])
+  expect(miniLog([], 1)).toEqual([])
+})
+
+test('an idle inline session fills its spare rows with the recent log', async ($, on) => {
+  engine(on)
+  await idleWithPrompts($, 10)
+  const ui = await $.ui.mount(inline())
+  expect(await rowsOf(ui)).toBe(8)
+  expect(await ui.find({ text: /last turn/ })).toBeDefined()
+  // vitals + last turn leave 6 rows: prompts 5-10, newest last
+  expect(await ui.find({ text: /^prompt 4$/ })).toBeUndefined()
+  for (const i of [5, 6, 7, 8, 9, 10]) expect(await ui.find({ text: new RegExp(`^prompt ${i}$`) })).toBeDefined()
+  expect(await ui.find({ text: /^you $/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an empty log adds no rows to the inline summary', async ($, on) => {
+  engine(on)
+  const ui = await $.ui.mount(inline())
+  expect(await rowsOf(ui)).toBe(1)
+  await ui.unmount()
+})
+
+test('a busy inline session keeps the old rows and leaves no room for the log', async ($, on) => {
+  engine(on)
+  let n = 0
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `b${++n}` }))
+  on('tool.check', () => ({ decision: 'allow' }))
+  on('turn.step', async function* (_$, e) {
+    const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: e.model }
+    return { turnId: e.turnId, index: 0, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage }
+  })
+  await $.turn.start({ text: 'go', turnId: 'B1' })
+  for (const d of ['one', 'two', 'three', 'four', 'five']) await $.agent.spawn(spawn('general-purpose', `task ${d}`))
+  await $.tool.check({ tool: 'Read', input: { file_path: '/a' }, tool_use_id: 'b-k1' })
+  for await (const _ of $.turn.step({ turnId: 'B1', index: 0, model: 'claude-opus-5-5', messageCount: 1, agentId: 'loop1' })) void _
+  await $.turn.complete({ answer: '', durationMs: 10, isAborted: false, turnId: 'B1', reason: 'answer' })
+  const ui = await $.ui.mount(inline())
+  expect(await rowsOf(ui)).toBe(8)
+  expect(await ui.find({ text: /\+2 more agents/ })).toBeDefined()
+  expect(await ui.find({ text: /other loops 1/ })).toBeDefined()
+  expect(await ui.find({ text: /last turn/ })).toBeDefined()
+  expect(await ui.find({ text: /spawned/ })).toBeUndefined()
+  expect(await ui.find({ text: /^go$/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('miniFill off restores the compact inline summary', { options: { miniFill: false } }, async ($, on) => {
+  engine(on)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  await idleWithPrompts($, 10)
+  await $.session.measure({ context: { window: 200_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 19 }], changed: ['rateLimits'] })
+  const ui = await $.ui.mount(inline())
+  expect(await rowsOf(ui)).toBe(2)
+  expect(await ui.find({ text: /prompt/ })).toBeUndefined()
+  expect(await ui.find({ text: /5h/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the inline vitals add effort, mode, requests and rate limits only once they are known', async ($, on) => {
+  engine(on)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'v1' }))
+  on('turn.step', async function* (_$, e) {
+    const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: e.model }
+    return { turnId: e.turnId, index: 0, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage }
+  })
+  const before = await $.ui.mount(inline())
+  for (const re of [/effort/, /mode/, /req/, /5h/]) expect(await before.find({ text: re })).toBeUndefined()
+  await before.unmount()
+  for await (const _ of $.turn.step({ turnId: 'V1', index: 0, model: 'claude-opus-5-5', messageCount: 1, effort: 'high' })) void _
+  await $.agent.spawn({ ...spawn('Explore', 'look'), permissionMode: 'auto' })
+  await $.session.measure({
+    context: { window: 200_000 },
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 19 },
+      { kind: 'seven_day', percentUsed: 3 },
+      { kind: 'spend_limit', percentUsed: 50 },
+    ],
+    changed: ['rateLimits'],
+  })
+  const after = await $.ui.mount(inline(200))
+  expect(await after.find({ text: / · effort high/ })).toBeDefined()
+  expect(await after.find({ text: / · mode auto/ })).toBeDefined()
+  expect(await after.find({ text: / · 1 req/ })).toBeDefined()
+  expect(await after.find({ text: / · 5h / })).toBeDefined()
+  expect(await after.find({ text: / · 7d / })).toBeDefined()
+  expect(await after.find({ text: /spend/ })).toBeUndefined() // the first two windows only
+  await after.unmount()
 })
