@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.2 (Daemeron fork)
+
+This version number is the fork's own (Daemeron/claude-flightdeck), so `claude plugin update` picks up its changes; it is not an upstream release.
+
+- Docked, an open gate drill-down (`f` `s` `o`) lists more than the last 5 checks when the pane has rows to spare: it takes up to half of the rows the session log would get above its 4-line floor, never more than the checks of that family it keeps, and the log takes the rest. The row budget charges the drill-down at its new size, so the pane still fits its height. Set `dockFill` to `false` for the old 5.
+
 ## 0.4.1 (Daemeron fork)
 
 This version number is the fork's own (Daemeron/claude-flightdeck), so `claude plugin update` picks up its changes; it is not an upstream release.

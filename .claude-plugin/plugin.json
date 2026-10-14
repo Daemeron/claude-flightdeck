@@ -1,6 +1,6 @@
 {
   "name": "flightdeck",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Flightdeck: a live agent dashboard for Claude Code. Main model vitals, an on-call architect, every permission check, subagent cards and swimlanes, a turn receipt and a session log, all from real session events",
   "author": {
     "name": "Stephen Casella",
@@ -93,7 +93,7 @@
     },
     "dockFill": {
       "title": "Fill the docked log",
-      "description": "When docked beside the transcript, let the session log grow into every row the other panels leave (up to the 60 lines it keeps); off keeps it at 8 lines",
+      "description": "When docked beside the transcript, let the session log grow into every row the other panels leave (up to the 60 lines it keeps), and an open gate drill-down take up to half of them; off keeps the log at 8 lines and the drill-down at 5 checks",
       "type": "boolean",
       "default": true
     },
