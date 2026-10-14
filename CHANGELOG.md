@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.1 (Daemeron fork)
+
+This version number is the fork's own (Daemeron/claude-flightdeck), so `claude plugin update` picks up its changes; it is not an upstream release.
+
 - Docked, the session log grows into the rows the other panels leave instead of stopping at 8 lines, up to the 60 lines it keeps. Set `dockFill` to `false` for the old 8-line log.
 - The docked row budget counts what each panel really draws (the main box's four lines, the architect's wrapped moments and advice, the connector rows, cards' full height, the receipt, the expanded card's wrapped text) and skips panels that are hidden, so a filled log never pushes the pane past its height. With `dockFill` off the log keeps its 4-8 range, sized by the same budget.
 - The inline summary uses all 8 of its rows: the rows its other lines leave show the newest session-log lines (filtered like the docked log while you view a subagent's transcript), and the first line adds effort, permission mode, request count and the first two rate-limit windows where the width allows. Set `miniFill` to `false` for the compact summary.
