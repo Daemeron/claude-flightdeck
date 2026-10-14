@@ -38,6 +38,8 @@ import {
   fmtSpeed,
   listOf,
   logRows,
+  LOG_LINES,
+  wrapRows,
   MINI_ROWS,
   miniLog,
   momentOf,
@@ -131,7 +133,7 @@ async function migrate($: EngineInterface) {
 
 async function say($: EngineInterface, who: string, text: string, kind: LogLine['kind'] = 'info', agentId: string | null = null) {
   const line: LogLine = { at: await $.clock.now(), who, text, kind, agentId }
-  await update($, log, list => [...normalizeLog(list), line].slice(-60))
+  await update($, log, list => [...normalizeLog(list), line].slice(-LOG_LINES))
 }
 
 async function refreshStatus($: EngineInterface, cfg: Config) {
@@ -926,11 +928,45 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // ---- log: whatever rows the other panels leave, 4 to 8
-    // The main box's speed line and the gap above the log are a row each.
-    const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+    // A connector row above a panel, except where the flow is drawn by the panel itself or has none.
+    const hasLink = (ps: Panel[], i: number) => {
+      const p = ps[i]
+      const prev = ps[i - 1]
+      return !(i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops')
+    }
+
+    // ---- log: whatever rows the other panels leave; 4 to 8, or all it keeps with dockFill
+    // Rows each panel draws at width w, as the panels above draw them (borders included).
+    const panelRows = (p: Panel, w: number): number => {
+      const inner = w - 4
+      if (p === 'main') return 4 + (ctxGauge ? 1 : 0) + (u.costUsd !== null || u.limits.length > 0 ? 1 : 0) + (m.speed ? 1 : 0)
+      // The four moment labels need 59 cells on one row; narrower, they wrap to two.
+      if (p === 'architect') return 5 + (cfg.moments ? (inner >= 59 ? 1 : 2) : 0) + (a.lastAdvice ? 1 : 0)
+      if (p === 'gate') return 6 + (v.gateOpen ? Math.min(5, g.recent.filter(c => c.bucket === v.gateOpen).length) : 0)
+      if (p === 'loops') return 1
+      if (p === 'receipt') return 3 + (t.isReviewing ? 1 : 0)
+      if (p !== 'agents') return 0
+      const fit = Math.max(1, Math.min(cfg.maxCards, Math.floor((w + 1) / 21)))
+      const agentRows = cards.length > fit ? 1 + (cards.length > 6 ? 1 : 0) + Math.min(6, cards.length) : 10
+      const expandedRows = expandedCard
+        ? 3 +
+          wrapRows(expandedCard.description || expandedCard.type, inner) +
+          Math.max(1, expandedCard.tools.length) +
+          (expandedCard.answer ? wrapRows(`» ${shorten(expandedCard.answer, 240)}`, inner) : 0)
+        : 0
+      return agentRows + expandedRows
+    }
+    const columnRows = (ps: Panel[], w: number) => ps.reduce((n, p, i) => n + (hasLink(ps, i) ? 1 : 0) + panelRows(p, w), 0)
+    const others = isWide
+      ? Math.max(
+          columnRows(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW),
+          columnRows(panels.filter(p => p === 'agents' || p === 'loops' || p === 'receipt'), colW),
+        )
+      : columnRows(panels, W)
+    // The title and legend rows, the panels, desktop's lane chart (a row per lane), the gap above the log.
+    const used = 2 + others + (e.surface !== 'terminal' && cards.length > 0 ? Math.min(10, cards.length) + 1 : 0) + 1
     const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
-    const nLog = logRows(bodyRows, used)
+    const nLog = logRows(bodyRows, used, cfg.dockFill)
     const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
     const colorOf = (l: LogLine) =>
       l.kind === 'error' ? C.warn : l.kind === 'consult' ? C.arch : l.who === 'main' ? C.main : l.who === 'gate' ? C.gate : l.who === 'you' ? C.text : C.agent
@@ -975,11 +1011,7 @@ export const register: Register = (on, options) => {
     const column = (ps: Panel[], w: number) => (
       <Box flexDirection="column" width={w}>
         {ps.map((p, i) => {
-          const prev = ps[i - 1]
-          const link =
-            i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
-              ? null
-              : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
+          const link = hasLink(ps, i) ? rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w) : null
           return (
             <Box flexDirection="column">
               {link}

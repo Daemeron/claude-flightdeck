@@ -108,6 +108,7 @@ export type Config = {
   openOnStart: boolean
   statusLine: boolean
   miniFill: boolean
+  dockFill: boolean
 }
 
 const safeRegExp = (source: string, fallback: string) => {
@@ -142,6 +143,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     openOnStart: bool('openOnStart', true),
     statusLine: bool('statusLine', true),
     miniFill: bool('miniFill', true),
+    dockFill: bool('dockFill', true),
   }
 }
 
@@ -463,8 +465,35 @@ export const lanes = (cards: AgentCard[], now: number, width: number) => {
 
 // ---------------------------------------------------------------- layout
 
-/** How many log lines fit: what the other panels leave, never fewer than 4 nor more than 8. */
-export const logRows = (bodyRows: number, used: number) => Math.max(4, Math.min(8, bodyRows - used - 3))
+/** How many session-log lines the pane keeps. */
+export const LOG_LINES = 60
+
+/**
+ * How many log lines fit: what the other panels leave (`used`, plus the log's own frame and title),
+ * never fewer than 4, and no more than 8 unless `fill` lets the log take every line it keeps.
+ */
+export const logRows = (bodyRows: number, used: number, fill = false) =>
+  Math.max(4, Math.min(fill ? LOG_LINES : 8, bodyRows - used - 3))
+
+/** Rows a `wrap="wrap"` text takes at `width` cells: greedy word wrap, long words broken hard. */
+export const wrapRows = (text: string, width: number) => {
+  const w = Math.max(1, width)
+  let rows = 0
+  for (const line of text.split('\n')) {
+    let col = 0
+    rows += 1
+    for (const word of line.split(' ')) {
+      if (col > 0 && col + 1 + word.length <= w) {
+        col += 1 + word.length
+        continue
+      }
+      if (col > 0) rows += 1
+      rows += Math.floor(Math.max(0, word.length - 1) / w)
+      col = word.length - Math.floor(Math.max(0, word.length - 1) / w) * w
+    }
+  }
+  return rows
+}
 
 /** The rows the pane asks for when seated inline above the prompt; the mini layout never draws more. */
 export const MINI_ROWS = 8

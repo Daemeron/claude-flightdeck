@@ -90,7 +90,7 @@ Focus the pane with `ctrl+x tab`, then:
 
 ## Where it runs
 
-- **Fullscreen terminal:** docked beside the transcript; two columns from 110 columns wide.
+- **Fullscreen terminal:** docked beside the transcript; two columns from 110 columns wide. The session log takes the rows the other panels leave (`dockFill`).
 - **Main-screen terminal:** inline above the prompt, as the 8-row summary. Rows the summary doesn't need show the newest session-log lines (`miniFill`).
 - **Desktop app, VS Code, mobile:** the same panels, plus the agents drawn as an SVG time axis. VS Code and mobile can't animate, so connectors and clocks are static there.
 
@@ -133,6 +133,7 @@ In `/config`, or under `pluginConfigs["flightdeck"].options` in `settings.json`:
 | `panels` | `main,architect,gate,agents,loops,receipt,log` | which panels show, in order |
 | `layout` | `auto` | `mini`, `compact`, `wide`, or `auto` (mini inline, wide from 110 columns docked) |
 | `miniFill` | `true` | fill the inline summary's spare rows: effort, mode, requests and rate limits on its first line, then the newest session-log lines; `false` keeps the compact summary |
+| `dockFill` | `true` | let the docked session log grow into every row the other panels leave, up to the 60 lines it keeps; `false` keeps it at 8 lines |
 | `maxCards` | `3` | cards side by side before swimlanes (1–6); fewer if the pane is too narrow |
 | `motion` | `while-active` | `off` keeps connectors still |
 | `moments` | `true` | show the inferred consult moments |

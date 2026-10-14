@@ -19,6 +19,8 @@ import {
   limitLabel,
   limitOf,
   logRows,
+  LOG_LINES,
+  wrapRows,
   MINI_ROWS,
   miniLog,
   momentOf,
@@ -139,6 +141,7 @@ test('consults open, close by id, and draw on a shared timeline', () => {
 
 test('config is read leniently: bad values fall back to defaults', () => {
   const d = parseConfig({})
+  expect([d.miniFill, d.dockFill, parseConfig({ dockFill: false }).dockFill, parseConfig({ dockFill: 'no' }).dockFill]).toEqual([true, true, false, true])
   expect([d.maxCards, d.layout, d.motion, d.moments, d.panels.length]).toEqual([3, 'auto', true, true, 7])
   expect(d.architect.test('fable-advisor:fable-advisor')).toBe(true)
   const c = parseConfig({ architectPattern: '([', maxCards: 99, layout: 'diagonal', panels: 'log, gate ,nope,gate', motion: 'off' })
@@ -216,7 +219,7 @@ const engine = (on: On) => {
   return clock
 }
 
-const pane = (bodyColumns: number) => ({
+const pane = (bodyColumns: number, bodyRows = 70) => ({
   plugin: 'flightdeck',
   component: 'Pane' as const,
   requestId: 'flightdeck',
@@ -225,7 +228,7 @@ const pane = (bodyColumns: number) => ({
     isFocused: true,
     bodyColumns,
     placement: 'dock' as const,
-    scroll: { offset: 0, bodyRows: 70 },
+    scroll: { offset: 0, bodyRows },
     view: {},
   },
 })
@@ -612,4 +615,151 @@ test('the inline vitals add effort, mode, requests and rate limits only once the
   expect(await after.find({ text: / · 7d / })).toBeDefined()
   expect(await after.find({ text: /spend/ })).toBeUndefined() // the first two windows only
   await after.unmount()
+})
+
+// ---------------------------------------------------------------- docked fill
+
+test('the docked log takes 4-8 rows, or with dockFill every row the panels leave up to all it keeps', () => {
+  // Off: the old rule, unchanged.
+  expect([logRows(10, 40, false), logRows(50, 40, false), logRows(200, 40, false), logRows(70, 20, false)]).toEqual([4, 7, 8, 8])
+  // On: the same floor, then whatever is left, up to the lines the pane keeps.
+  expect([logRows(10, 40, true), logRows(50, 40, true), logRows(70, 20, true), logRows(200, 40, true)]).toEqual([4, 7, 47, LOG_LINES])
+  expect(LOG_LINES).toBe(60)
+  expect([wrapRows('', 10), wrapRows('short', 10), wrapRows('one two three', 7), wrapRows('abcdefghijklmnopqrstuvwxyz', 10), wrapRows('a\nb', 10)]).toEqual([1, 1, 2, 3, 2])
+})
+
+type Drawn = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+const kids = (el: Drawn) => (el.children ?? []).flat(Infinity).filter(c => c !== null && c !== undefined && c !== false)
+const textOf = (x: unknown): string =>
+  typeof x === 'string' || typeof x === 'number' ? String(x) : x && typeof x === 'object' ? String((x as Drawn).props?.label ?? '') + kids(x as Drawn).map(textOf).join('') : ''
+const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+
+/** Rows a drawn tree takes at `w` columns, laid out as the terminal lays out the elements this pane uses. */
+const rowsAt = (x: unknown, w: number): number => {
+  if (!x || typeof x !== 'object') return 1
+  const el = x as Drawn
+  const p = el.props ?? {}
+  if (el.type === 'Text') return p.wrap === 'wrap' ? wrapRows(textOf(el), w) : 1
+  if (el.type !== 'Box') return Math.max(1, num(p.height))
+  const frame = p.borderStyle ? 2 : 0
+  const inner = (typeof p.width === 'number' ? p.width : w) - frame - 2 * num(p.paddingX)
+  const cs = kids(el)
+  let body = 0
+  if (p.flexDirection === 'column') body = cs.reduce<number>((n, c) => n + rowsAt(c, inner), 0)
+  else if (p.flexWrap === 'wrap') {
+    let col = 0
+    body = cs.length > 0 ? 1 : 0
+    for (const c of cs) {
+      const cw = textOf(c).length
+      if (col > 0 && col + num(p.columnGap) + cw > inner) {
+        body += 1
+        col = 0
+      }
+      col += (col > 0 ? num(p.columnGap) : 0) + cw
+    }
+  } else body = Math.max(0, ...cs.map(c => rowsAt(c, inner)))
+  return frame + 2 * num(p.paddingY) + num(p.marginTop) + num(p.marginBottom) + body
+}
+
+/** The lines the docked log draws: its panel's rows below the `session log` title. */
+const logLinesOf = (x: unknown): number => {
+  if (!x || typeof x !== 'object') return -1
+  const cs = kids(x as Drawn)
+  if ((x as Drawn).type === 'Box' && textOf(cs[0]) === 'session log') return cs.length - 1
+  return Math.max(-1, ...cs.map(logLinesOf))
+}
+
+/** How many of `prompt 1`..`prompt n` the docked log shows. */
+const promptsShown = async (ui: { find: (q: { text: RegExp }) => Promise<unknown> }, n: number) => {
+  let shown = 0
+  for (let i = 1; i <= n; i += 1) if (await ui.find({ text: new RegExp(`^prompt ${i}$`) })) shown += 1
+  return shown
+}
+
+test('a tall docked pane fills with the session log', async ($, on) => {
+  engine(on)
+  await idleWithPrompts($, 40)
+  const ui = await $.ui.mount({ ...pane(58, 70), surface: 'terminal' })
+  const shown = await promptsShown(ui, 40)
+  expect(shown > 30).toBe(true)
+  expect(await ui.find({ text: /^prompt 40$/ })).toBeDefined() // the newest line is never the one cut
+  expect(rowsAt(await ui.drawn(), 58) <= 70).toBe(true)
+  await ui.unmount()
+})
+
+test('dockFill off keeps the docked log at 8 lines', { options: { dockFill: false } }, async ($, on) => {
+  engine(on)
+  await idleWithPrompts($, 40)
+  const ui = await $.ui.mount({ ...pane(58, 70), surface: 'terminal' })
+  expect(await promptsShown(ui, 40)).toBe(8)
+  expect(await ui.find({ text: /^prompt 33$/ })).toBeDefined()
+  expect(await ui.find({ text: /^prompt 32$/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+/** At each size: the log grows only into free rows (at its floor of 4 there is nothing to give back), and leaves a few spare at most. */
+const fillsWithoutOverflow = async ($: Parameters<TestBody>[0], sizes: [number, number][]) => {
+  for (const [cols, rows] of sizes) {
+    const ui = await $.ui.mount({ ...pane(cols, rows), surface: 'terminal' })
+    const tree = await ui.drawn()
+    const drawn = rowsAt(tree, cols)
+    const lines = logLinesOf(tree)
+    if (lines > 4) expect({ cols, rows, drawn: drawn <= rows }).toEqual({ cols, rows, drawn: true })
+    if (lines > 4 && lines < LOG_LINES) expect({ cols, rows, spare: rows - drawn <= 6 }).toEqual({ cols, rows, spare: true })
+    await ui.unmount()
+  }
+}
+
+test('a busy docked pane never grows its log past the rows it has', async ($, on) => {
+  engine(on)
+  let n = 0
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `f${++n}` }))
+  on('tool.check', () => ({ decision: 'allow' }))
+  on('tool.call', () => ({ result: {}, text: 'ok' }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('turn.step', async function* (_$, e) {
+    const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: e.model }
+    return { turnId: e.turnId, index: 0, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage }
+  })
+  await idleWithPrompts($, 40)
+  await $.session.measure({
+    context: { window: 200_000, tokens: 50_000, percent: 25 },
+    cost: { usd: 1.5 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 19 }, { kind: 'seven_day', percentUsed: 3 }],
+    changed: ['context', 'rateLimits'],
+  } as never)
+  await $.turn.start({ text: 'go', turnId: 'F1' })
+  await $.agent.spawn(spawn('fable-advisor:fable-advisor', 'review'))
+  for (const d of ['one', 'two', 'three', 'four', 'five', 'six', 'seven']) await $.agent.spawn(spawn('general-purpose', `task ${d} with a long description that wraps`))
+  for (let i = 0; i < 8; i += 1) await $.tool.check({ tool: 'Bash', input: { command: `ls ${i}` }, tool_use_id: `f-k${i}` })
+  for await (const _ of $.turn.step({ turnId: 'F1', index: 0, model: 'claude-opus-5-5', messageCount: 1, agentId: 'loop1' })) void _
+  // The gate's drill-down and a card's detail open, as the person leaves them across redraws.
+  const first = await $.ui.mount({ ...pane(58), surface: 'terminal' })
+  await first.press({ key: 'gate-shell' })
+  await first.press({ key: 'card-f8' })
+  expect(await first.find({ text: /^task seven with a long description that wraps$/ })).toBeDefined()
+  expect(await first.find({ text: /ls 7/ })).toBeDefined()
+  await first.unmount()
+  await fillsWithoutOverflow($, [[58, 20], [58, 40], [58, 55], [58, 70], [58, 90], [120, 30], [120, 50], [120, 80]])
+})
+
+test('a quiet docked pane with cards and advice never grows its log past the rows it has', async ($, on) => {
+  engine(on)
+  let n = 0
+  on('agent.spawn', (_$, e) => ({ model: 'claude-sonnet-5-5', agentId: e.subagentType.startsWith('fable') ? 'adv' : `q${++n}` }))
+  on('tool.check', () => ({ decision: 'allow' }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  await idleWithPrompts($, 40)
+  await $.session.measure({
+    context: { window: 200_000, tokens: 50_000, percent: 25 },
+    cost: { usd: 1.5 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 19 }],
+    changed: ['context', 'rateLimits'],
+  } as never)
+  await $.turn.start({ text: 'go', turnId: 'Q1' })
+  await $.agent.spawn(spawn('fable-advisor:fable-advisor', 'review'))
+  await $.turn.complete({ answer: 'Ship it after one more test.', durationMs: 10, isAborted: false, turnId: 'Q1', agentId: 'adv', reason: 'answer' })
+  for (const d of ['one', 'two']) await $.agent.spawn(spawn('general-purpose', `task ${d}`))
+  await $.tool.check({ tool: 'Read', input: { file_path: '/a' }, tool_use_id: 'q-k1' })
+  await fillsWithoutOverflow($, [[58, 30], [58, 45], [58, 60], [58, 75], [120, 40], [120, 60]])
 })

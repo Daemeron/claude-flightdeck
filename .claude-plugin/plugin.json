@@ -91,6 +91,12 @@
       "type": "boolean",
       "default": true
     },
+    "dockFill": {
+      "title": "Fill the docked log",
+      "description": "When docked beside the transcript, let the session log grow into every row the other panels leave (up to the 60 lines it keeps); off keeps it at 8 lines",
+      "type": "boolean",
+      "default": true
+    },
     "palette": {
       "title": "Palette",
       "description": "theme follows your Claude Code theme (light, dark, colour-blind); pastel is fixed colours tuned for dark terminals",
