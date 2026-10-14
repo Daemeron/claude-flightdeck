@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The inline summary uses all 8 of its rows: the rows its other lines leave show the newest session-log lines (filtered like the docked log while you view a subagent's transcript), and the first line adds effort, permission mode, request count and the first two rate-limit windows where the width allows. Set `miniFill` to `false` for the compact summary.
+
 ## 0.4.0
 
 - The main box shows the time left until each rate-limit window resets (`5h ▰▱▱▱▱ 19% ↻3h10m`), from the `resetsAt` the session already reports. Below 56 columns the gauges stay as they were. ([#3](https://github.com/scasella/claude-flightdeck/pull/3), thanks @vihrea1337)

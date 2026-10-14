@@ -85,6 +85,12 @@
       ],
       "default": "auto"
     },
+    "miniFill": {
+      "title": "Fill the inline summary",
+      "description": "Use the inline summary's spare rows for effort, mode, requests and rate limits on its first line and the newest session-log lines below; off keeps the compact summary",
+      "type": "boolean",
+      "default": true
+    },
     "palette": {
       "title": "Palette",
       "description": "theme follows your Claude Code theme (light, dark, colour-blind); pastel is fixed colours tuned for dark terminals",
