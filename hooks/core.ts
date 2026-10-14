@@ -475,6 +475,14 @@ export const LOG_LINES = 60
 export const logRows = (bodyRows: number, used: number, fill = false) =>
   Math.max(4, Math.min(fill ? LOG_LINES : 8, bodyRows - used - 3))
 
+/**
+ * How many checks the gate's open drill-down lists: the newest 5 (or all, when fewer exist), and
+ * with `fill` up to half the `spare` rows (those the log would get above its 4-line floor with the
+ * drill-down at 5) more, never more than `available` checks of that family exist.
+ */
+export const gateRows = (spare: number, available: number, fill = false) =>
+  Math.min(available, 5 + (fill ? Math.floor(Math.max(0, spare) / 2) : 0))
+
 /** Rows a `wrap="wrap"` text takes at `width` cells: greedy word wrap, long words broken hard. */
 export const wrapRows = (text: string, width: number) => {
   const w = Math.max(1, width)

@@ -18,6 +18,7 @@ import {
   lanes,
   limitLabel,
   limitOf,
+  gateRows,
   logRows,
   LOG_LINES,
   wrapRows,
@@ -762,4 +763,69 @@ test('a quiet docked pane with cards and advice never grows its log past the row
   for (const d of ['one', 'two']) await $.agent.spawn(spawn('general-purpose', `task ${d}`))
   await $.tool.check({ tool: 'Read', input: { file_path: '/a' }, tool_use_id: 'q-k1' })
   await fillsWithoutOverflow($, [[58, 30], [58, 45], [58, 60], [58, 75], [120, 40], [120, 60]])
+})
+
+// ---------------------------------------------------------------- gate drill-down fill
+
+test('the open drill-down lists 5 checks, or with dockFill up to half the spare rows, never more than exist', () => {
+  // Off: the newest 5, or all when fewer exist, whatever the spare rows.
+  expect([gateRows(0, 40), gateRows(30, 40), gateRows(30, 3)]).toEqual([5, 5, 3])
+  // On: no spare rows, the old 5; half of them more (rounded down); capped by the checks that exist.
+  expect([gateRows(0, 40, true), gateRows(-6, 40, true), gateRows(1, 40, true), gateRows(7, 40, true), gateRows(60, 40, true)]).toEqual([5, 5, 5, 8, 35])
+  expect([gateRows(30, 3, true), gateRows(30, 7, true), gateRows(30, 20, true), gateRows(30, 80, true)]).toEqual([3, 7, 20, 20])
+})
+
+/** How many of `ls 0`..`ls n-1` the gate's drill-down shows. */
+const checksShown = async (ui: { find: (q: { text: RegExp }) => Promise<unknown> }, n: number) => {
+  let shown = 0
+  for (let i = 0; i < n; i += 1) if (await ui.find({ text: new RegExp(`^Bash → ls ${i}$`) })) shown += 1
+  return shown
+}
+
+const fortyShellChecks = async ($: Parameters<TestBody>[0], on: On) => {
+  engine(on)
+  on('tool.check', () => ({ decision: 'allow' }))
+  await idleWithPrompts($, 40)
+  for (let i = 0; i < 40; i += 1) await $.tool.check({ tool: 'Bash', input: { command: `ls ${i}` }, tool_use_id: `d-k${i}` })
+  const first = await $.ui.mount({ ...pane(58, 70), surface: 'terminal' })
+  await first.press({ key: 'gate-shell' })
+  await first.unmount()
+  return $.ui.mount({ ...pane(58, 70), surface: 'terminal' })
+}
+
+test('a tall docked pane lists far more than 5 checks in the open drill-down and still fits', async ($, on) => {
+  const ui = await fortyShellChecks($, on)
+  const shown = await checksShown(ui, 40)
+  expect(shown > 15).toBe(true)
+  expect(await ui.find({ text: /^Bash → ls 39$/ })).toBeDefined() // newest last, never the one cut
+  expect(await ui.find({ text: /shell 40 ▾/ })).toBeDefined()
+  const tree = await ui.drawn()
+  expect(rowsAt(tree, 58) <= 70).toBe(true)
+  expect(logLinesOf(tree) >= shown - 1).toBe(true) // the log keeps at least the other half
+  await ui.unmount()
+  await fillsWithoutOverflow($, [[58, 20], [58, 40], [58, 55], [58, 90], [120, 30], [120, 60], [120, 90]])
+})
+
+test('dockFill off keeps the drill-down at 5 checks', { options: { dockFill: false } }, async ($, on) => {
+  const ui = await fortyShellChecks($, on)
+  expect(await checksShown(ui, 40)).toBe(5)
+  expect(await ui.find({ text: /^Bash → ls 35$/ })).toBeDefined()
+  expect(await ui.find({ text: /^Bash → ls 34$/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a drill-down with few checks shows them all and the log takes the rest', async ($, on) => {
+  engine(on)
+  on('tool.check', () => ({ decision: 'allow' }))
+  await idleWithPrompts($, 60)
+  for (let i = 0; i < 7; i += 1) await $.tool.check({ tool: 'Bash', input: { command: `ls ${i}` }, tool_use_id: `s-k${i}` })
+  const first = await $.ui.mount({ ...pane(58, 70), surface: 'terminal' })
+  await first.press({ key: 'gate-shell' })
+  await first.unmount()
+  const ui = await $.ui.mount({ ...pane(58, 70), surface: 'terminal' })
+  expect(await checksShown(ui, 7)).toBe(7)
+  const tree = await ui.drawn()
+  expect(rowsAt(tree, 58) <= 70).toBe(true)
+  expect(70 - rowsAt(tree, 58) <= 6).toBe(true) // no rows held back for checks that do not exist
+  await ui.unmount()
 })

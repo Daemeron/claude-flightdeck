@@ -38,6 +38,7 @@ import {
   fmtSpeed,
   listOf,
   logRows,
+  gateRows,
   LOG_LINES,
   wrapRows,
   MINI_ROWS,
@@ -756,7 +757,7 @@ export const register: Register = (on, options) => {
           {open
             ? g.recent
                 .filter(c => c.bucket === open)
-                .slice(-5)
+                .slice(-nGate)
                 .map(c => (
                   <Text wrap="truncate">
                     <Text color={verdictColor(c)}>{c.verdict === 'deny' ? '✗ ' : '■ '}</Text>
@@ -937,12 +938,12 @@ export const register: Register = (on, options) => {
 
     // ---- log: whatever rows the other panels leave; 4 to 8, or all it keeps with dockFill
     // Rows each panel draws at width w, as the panels above draw them (borders included).
-    const panelRows = (p: Panel, w: number): number => {
+    const panelRows = (p: Panel, w: number, gateN: number): number => {
       const inner = w - 4
       if (p === 'main') return 4 + (ctxGauge ? 1 : 0) + (u.costUsd !== null || u.limits.length > 0 ? 1 : 0) + (m.speed ? 1 : 0)
       // The four moment labels need 59 cells on one row; narrower, they wrap to two.
       if (p === 'architect') return 5 + (cfg.moments ? (inner >= 59 ? 1 : 2) : 0) + (a.lastAdvice ? 1 : 0)
-      if (p === 'gate') return 6 + (v.gateOpen ? Math.min(5, g.recent.filter(c => c.bucket === v.gateOpen).length) : 0)
+      if (p === 'gate') return 6 + gateN
       if (p === 'loops') return 1
       if (p === 'receipt') return 3 + (t.isReviewing ? 1 : 0)
       if (p !== 'agents') return 0
@@ -956,16 +957,21 @@ export const register: Register = (on, options) => {
         : 0
       return agentRows + expandedRows
     }
-    const columnRows = (ps: Panel[], w: number) => ps.reduce((n, p, i) => n + (hasLink(ps, i) ? 1 : 0) + panelRows(p, w), 0)
-    const others = isWide
-      ? Math.max(
-          columnRows(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW),
-          columnRows(panels.filter(p => p === 'agents' || p === 'loops' || p === 'receipt'), colW),
-        )
-      : columnRows(panels, W)
+    const columnRows = (ps: Panel[], w: number, gateN: number) => ps.reduce((n, p, i) => n + (hasLink(ps, i) ? 1 : 0) + panelRows(p, w, gateN), 0)
+    const others = (gateN: number) =>
+      isWide
+        ? Math.max(
+            columnRows(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW, gateN),
+            columnRows(panels.filter(p => p === 'agents' || p === 'loops' || p === 'receipt'), colW, gateN),
+          )
+        : columnRows(panels, W, gateN)
     // The title and legend rows, the panels, desktop's lane chart (a row per lane), the gap above the log.
-    const used = 2 + others + (e.surface !== 'terminal' && cards.length > 0 ? Math.min(10, cards.length) + 1 : 0) + 1
+    const usedWith = (gateN: number) => 2 + others(gateN) + (e.surface !== 'terminal' && cards.length > 0 ? Math.min(10, cards.length) + 1 : 0) + 1
     const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
+    // The open drill-down takes up to half the rows the log would have above its floor; the log is charged for it.
+    const familyChecks = v.gateOpen ? g.recent.filter(c => c.bucket === v.gateOpen).length : 0
+    const nGate = gateRows(bodyRows - usedWith(Math.min(5, familyChecks)) - 3 - 4, familyChecks, cfg.dockFill)
+    const used = usedWith(nGate)
     const nLog = logRows(bodyRows, used, cfg.dockFill)
     const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
     const colorOf = (l: LogLine) =>
